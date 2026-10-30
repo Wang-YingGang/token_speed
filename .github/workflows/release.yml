@@ -82,14 +82,16 @@ jobs:
           $binary = 'src-tauri/target/release/token-speed.exe'
           if (-not (Test-Path -LiteralPath $installer)) { throw "Installer not found: $installer" }
           if (-not (Test-Path -LiteralPath $binary)) { throw "Executable not found: $binary" }
-          Copy-Item -LiteralPath $installer -Destination release-assets
+          $installerAsset = "release-assets/Token-Speed_$($env:RELEASE_VERSION)_windows-x64-setup.exe"
+          Copy-Item -LiteralPath $installer -Destination $installerAsset
           $portable = "release-assets/Token-Speed_$($env:RELEASE_VERSION)_windows-x64-portable.zip"
           Compress-Archive -LiteralPath $binary -DestinationPath $portable
           $checksums = Get-ChildItem -LiteralPath release-assets -File | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           }
-          $checksums | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
+          $checksumText = ($checksums -join "`n") + "`n"
+          [IO.File]::WriteAllText((Join-Path $PWD 'release-assets/SHA256SUMS.txt'), $checksumText, [Text.UTF8Encoding]::new($false))
 
       - name: Publish GitHub Release
         env:

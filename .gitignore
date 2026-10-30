@@ -4,9 +4,24 @@
 /src-tauri/gen/schemas/
 /dist/
 /build/
+/release-assets/
 
 # Local integration data, screenshots, and WebView profile
 /integration/
+
+# Temporary work and tool caches
+/tmp/
+/temp/
+/scratch/
+/.cache/
+.pytest_cache/
+.ruff_cache/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
 
 # Python caches and virtual environments
 __pycache__/

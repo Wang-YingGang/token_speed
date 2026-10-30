@@ -31,12 +31,29 @@ npm run build
 
 ```powershell
 python -m pip install --target integration/.deps websockets pillow
+python prepare_integration_db.py
 cargo build --manifest-path src-tauri/Cargo.toml
 npm run test:native
 ```
+
+`integration/` 存放可重新生成的联调数据库、截图和 WebView 缓存，`src-tauri/target/` 存放构建产物，均不提交。临时调试文件统一放入已忽略的 `scratch/`、`tmp/` 或 `temp/` 目录。
 
 可通过 `TOKEN_SPEED_EXE` 指定要验证的 EXE。`CC_SWITCH_DB` 可指定用量数据库；`TOKEN_SPEED_SETTINGS` 可指定设置文件。默认数据库为 `%USERPROFILE%\.cc-switch\cc-switch.db`。
 
 构建产物：`src-tauri/target/release/token-speed.exe` 和 `src-tauri/target/release/bundle/nsis/Token Speed_0.6.0_x64-setup.exe`。
 
 图标源文件为 `assets/icon-source.png`，设计提示词见 `assets/icon-design.md`；运行 `python generate_icon.py` 重建所有图标格式。
+
+## 自动发布
+
+推送 `v*` 版本标签后，GitHub Actions 会校验版本、运行 Rust / 前端测试、构建 Windows x64 安装包，然后发布到仓库的 Releases。附件包括 NSIS 安装包、便携版 ZIP 和 `SHA256SUMS.txt`。带预发布后缀的标签（如 `v0.7.0-beta.1`）会发布为 Pre-release。
+
+发布前保持 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 的应用版本一致，提交并推送后创建同版本标签：
+
+```powershell
+node scripts/validate-release.mjs v0.7.0
+git tag -a v0.7.0 -m "Token Speed v0.7.0"
+git push origin v0.7.0
+```
+
+首次版本为 `v0.6.0`。失败后可在 Actions 页面重新运行，或手动运行 Release 工作流并填写已存在的版本标签。发布使用 GitHub 自动提供的仓库令牌，无需配置额外 Secret。

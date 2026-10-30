@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release, for example v0.6.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      CARGO_INCREMENTAL: '0'
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Verify tag and project versions
+        id: version
+        run: |
+          git show-ref --verify "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'The release tag must already exist.' }
+          node scripts/validate-release.mjs "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build Windows installer
+        run: npm run build -- --bundles nsis -- --locked
+
+      - name: Prepare release assets
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          $installer = "src-tauri/target/release/bundle/nsis/Token Speed_$($env:RELEASE_VERSION)_x64-setup.exe"
+          $binary = 'src-tauri/target/release/token-speed.exe'
+          if (-not (Test-Path -LiteralPath $installer)) { throw "Installer not found: $installer" }
+          if (-not (Test-Path -LiteralPath $binary)) { throw "Executable not found: $binary" }
+          Copy-Item -LiteralPath $installer -Destination release-assets
+          $portable = "release-assets/Token-Speed_$($env:RELEASE_VERSION)_windows-x64-portable.zip"
+          Compress-Archive -LiteralPath $binary -DestinationPath $portable
+          $checksums = Get-ChildItem -LiteralPath release-assets -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $checksums | Set-Content -LiteralPath release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @(Get-ChildItem -LiteralPath release-assets -File | ForEach-Object { $_.FullName })
+          gh release view "$env:RELEASE_TAG" --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$env:RELEASE_TAG" @assets --clobber
+          } else {
+            $arguments = @('release', 'create', $env:RELEASE_TAG, '--verify-tag', '--draft', '--title', "Token Speed $env:RELEASE_TAG", '--generate-notes')
+            if ($env:PRERELEASE -eq 'true') { $arguments += '--prerelease' }
+            gh @arguments @assets
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
+          if ($env:PRERELEASE -eq 'true') {
+            gh release edit "$env:RELEASE_TAG" --draft=false --prerelease
+          } else {
+            gh release edit "$env:RELEASE_TAG" --draft=false --prerelease=false --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

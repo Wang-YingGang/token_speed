@@ -1,0 +1,32 @@
+# Dependencies and build output
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+/dist/
+/build/
+
+# Local integration data, screenshots, and WebView profile
+/integration/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+/.venv/
+/venv/
+
+# Local credentials and runtime data
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+
+# Editor and operating system files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,18 @@
+{
+  "name": "token-speed-monitor",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "test": "npm run test:rust && npm run test:ui",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:ui": "node tests/activity.test.mjs",
+    "test:native": "python settings_integration_check.py"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/cli": "^2.8.0"
+  }
+}

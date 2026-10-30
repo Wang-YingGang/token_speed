@@ -1,0 +1,109 @@
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  color: #e5eaf3; background: transparent; color-scheme: dark;
+  font-synthesis: none; --monitor-font: 11px; --monitor-opacity: .92;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { background: transparent; user-select: none; }
+button, select, input { font: inherit; }
+button { color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #8da9ff; outline-offset: 2px; }
+.monitor { display: flex; align-items: center; gap: 5px; width: 100%; height: 100%; padding: 2px 7px; background: transparent; }
+.compact-main { display: flex; flex: 1; align-items: center; align-self: stretch; min-width: 0; padding: 0; border: 0; background: transparent; cursor: grab; }
+.compact-main:active { cursor: grabbing; }
+.position-locked .compact-main { cursor: pointer; }
+.display-slot { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 1px; height: 100%; min-width: 0; text-align: left; }
+.taskbar-row { display: flex; align-items: center; gap: 4px; width: 100%; height: calc(var(--monitor-font) + 8px); min-height: 0; line-height: 1; }
+.taskbar-app-label { flex: 0 0 calc(var(--monitor-font) * 3.45); font-size: calc(var(--monitor-font) - 1px); font-weight: 500; }
+.claude .taskbar-app-label { color: #b3c2ff; }
+.codex .taskbar-app-label { color: #8de4ce; }
+.taskbar-speed { flex: 0 0 auto; color: #f5f5f8; font-size: var(--monitor-font); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.taskbar-speed small { margin-left: 2px; color: #b0acb7; font-size: calc(var(--monitor-font) - 3px); }
+.taskbar-speed .recent-tag { margin-left: 5px; color: #b8c7e6; font-size: calc(var(--monitor-font) - 3px); }
+.taskbar-row.is-idle .taskbar-speed { color: #959dac; font-size: calc(var(--monitor-font) - 1px); }
+.taskbar-row.is-idle .taskbar-sparkline { opacity: .24; }
+.taskbar-sparkline { flex: 1; min-width: 24px; width: 100%; height: 18px; margin-left: 6px; overflow: visible; }
+.single .taskbar-sparkline { height: 26px; }
+.icon-button { display: grid; flex: 0 0 auto; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: #909db3; background: transparent; }
+.icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button:hover { color: #e3ebff; background: rgba(147,168,220,.1); }
+.monitor > .icon-button { display: none; }
+.floating-window .monitor { padding: 3px 5px 3px 10px; border: 1px solid rgba(163,177,211,.22); border-radius: 10px; background: rgb(20 25 36 / var(--monitor-opacity)); }
+.floating-window .monitor > .icon-button { display: grid; }
+.floating-window.light-monitor .monitor { background: rgb(245 248 253 / var(--monitor-opacity)); border-color: rgba(45,63,99,.2); }
+.floating-window.light-monitor .taskbar-speed { color: #192a43; }
+.floating-window.light-monitor .taskbar-speed small { color: #52647c; }
+.floating-window.light-monitor .is-idle .taskbar-speed { color: #76849a; }
+.floating-window.light-monitor .claude .taskbar-app-label { color: #4b5abb; }
+.floating-window.light-monitor .codex .taskbar-app-label { color: #007e68; }
+.floating-window.light-monitor .claude .taskbar-sparkline { color: #4b5abb; }
+.floating-window.light-monitor .codex .taskbar-sparkline { color: #007e68; }
+/* Compact neutral palette, matching a Windows tray flyout. */
+.settings-panel { position: relative; display: flex; flex-direction: column; height: calc(100% - 12px); margin: 6px; border: 1px solid #414144; border-radius: 13px; background: #242426; box-shadow: 0 9px 24px #0004; overflow: hidden; color: #dedee1; }
+.settings-header { display: flex; align-items: center; flex: 0 0 51px; gap: 8px; padding: 0 14px; }
+.app-symbol { width: 23px; height: 23px; border-radius: 6px; object-fit: contain; }
+h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.2px; }
+.save-status { margin-left: auto; color: #77777e; font-size: 10px; }
+.save-status.saving { color: #b7bdcc; }
+.close-button { width: 24px; height: 24px; color: #95959e; }
+.settings-tabs { display: flex; flex: 0 0 29px; margin: 0 11px 9px; padding: 2px; border-radius: 9px; background: #363639; }
+.settings-tabs button { flex: 1; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 11px; }
+.settings-tabs button.active { color: #eeeef0; background: #555558; box-shadow: 0 1px 3px #0002; }
+.settings-tabs button:hover:not(.active) { color: #dedee4; background: #414144; }
+.settings-content { flex: 1; min-height: 0; padding: 0 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #535356 transparent; }
+.group-heading { display: flex; justify-content: space-between; align-items: center; height: 24px; padding: 0 5px; color: #9999a2; font-size: 10px; }
+.muted { color: #7d7d86; font-size: 9px; }
+.settings-group { padding: 2px 10px; border-radius: 9px; background: #2d2d30; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; min-height: 32px; gap: 5px; }
+.setting-row + .setting-row { border-top: 1px solid #ffffff07; }
+.setting-row > label:first-child { display: flex; align-items: center; gap: 6px; color: #d2d2d8; font-size: 12px; }
+.setting-row select { width: 119px; height: 25px; padding: 0 6px; border: 1px solid #4a4a50; border-radius: 6px; color: #d5d5dc; background: #38383c; font-size: 10px; cursor: pointer; }
+.setting-row :disabled { opacity: .35; cursor: default; }
+.app-pair { display: flex; align-items: center; gap: 3px; }
+.app-pair i { width: 4px; height: 4px; border-radius: 50%; background: #c5c1f1; }
+.app-pair i + i { background: #9cd9c8; }
+.toggle-control { display: flex; align-items: center; padding: 5px 0 5px 15px; cursor: pointer; }
+.toggle-control input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch { position: relative; width: 29px; height: 16px; border-radius: 10px; background: #505054; transition: background 140ms; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #dedee1; transition: transform 140ms; box-shadow: 0 1px 2px #0004; }
+.toggle-control input:checked + .switch { background: #a6c6ba; }
+.toggle-control input:checked + .switch::after { transform: translateX(13px); background: #fff; }
+.toggle-control input:focus-visible + .switch { outline: 2px solid #c9ddd4; outline-offset: 3px; }
+.toggle-control input:disabled + .switch { opacity: .3; }
+.range-control { display: flex; gap: 8px; align-items: center; }
+.range-control input { width: 74px; height: 3px; accent-color: #bac8c5; cursor: pointer; }
+.range-control output { width: 36px; color: #b9b9c2; font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; }
+.offset-control { display: flex; align-items: center; gap: 3px; }
+.offset-control button { min-width: 20px; height: 24px; padding: 0 3px; border: 0; border-radius: 5px; background: #414145; color: #d7d7df; font-size: 10px; }
+.offset-control button:hover { background: #57575c; }
+.number-field { display: flex; align-items: center; height: 24px; border: 1px solid #515158; border-radius: 5px; background: #242427; }
+.number-field input { width: 46px; height: 22px; padding: 0 2px; border: 0; border-radius: 5px; color: #e0e0e8; background: transparent; font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; appearance: textfield; }
+.number-field span { padding-right: 5px; color: #84848f; font-size: 9px; }
+.number-field input::-webkit-inner-spin-button { appearance: none; }
+.page-note { margin: 7px 5px 2px; color: #777780; font-size: 9px; line-height: 1.6; }
+.info-note { display: flex; gap: 8px; margin: 16px 5px 0; color: #86868f; font-size: 10px; line-height: 1.8; }
+.info-mark { display: grid; place-items: center; flex: 0 0 14px; height: 14px; margin-top: 3px; border: 1px solid #76767f; border-radius: 50%; font-family: Georgia,serif; font-size: 10px; }
+.info-note p { margin: 0; }
+.settings-footer { flex: 0 0 67px; margin-top: 7px; border-top: 1px solid #ffffff10; padding: 0 16px; }
+.connection-row { display: flex; height: 28px; align-items: center; justify-content: space-between; gap: 8px; color: #74747e; font-size: 9px; }
+.database-status { display: flex; align-items: center; min-width: 0; }
+.database-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-dot { flex: 0 0 4px; width: 4px; height: 4px; margin-right: 5px; border-radius: 50%; background: #d8ad6f; }
+.database-status.connected .status-dot { background: #9abfaa; }
+.database-status.error .status-dot { background: #dc8d98; }
+.footer-actions { display: flex; align-items: center; justify-content: space-between; height: 32px; }
+.footer-actions button { display: flex; align-items: center; gap: 7px; padding: 4px 0; border: 0; color: #bebec7; background: transparent; font-size: 11px; }
+.footer-actions button:hover { color: #fff; }
+.footer-actions svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.feedback { position: absolute; bottom: 74px; left: 15px; right: 15px; padding: 8px 10px; border: 1px solid #665158; border-radius: 7px; color: #ffd2d9; background: #423035; font-size: 10px; overflow-wrap: anywhere; pointer-events: none; }
+.taskbar-sparkline { color: #b3c2ff; height: calc(var(--monitor-font) + 8px); }
+.codex .taskbar-sparkline { color: #8de4ce; }
+.chart-line { fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.chart-point { fill: currentColor; }
+.chart-grid { stroke: currentColor; stroke-opacity: .2; stroke-width: .5; vector-effect: non-scaling-stroke; }
+.chart-axis { fill: none; stroke: currentColor; stroke-opacity: .5; stroke-width: .6; vector-effect: non-scaling-stroke; }
+.chart-tick { fill: currentColor; opacity: .8; font-size: 6px; font-variant-numeric: tabular-nums; }
+.taskbar-row.is-idle .taskbar-sparkline { opacity: .5; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }

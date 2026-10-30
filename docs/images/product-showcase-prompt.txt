@@ -1,0 +1,15 @@
+Use case: compositing.
+Asset type: A polished, readable GitHub README product showcase banner for the existing Windows desktop utility Token Speed. Wide landscape, about 1600x1000.
+Input images are exact current v0.6.0 product UI screenshots, not loose design references. Image 1: complete settings display window, must be inserted faithfully. Image 2: dark floating monitor screenshot, supporting insert. Image 3: light floating monitor screenshot, supporting insert. Image 4: actual application icon, brand insert.
+Primary request: compose these real product screenshots into a restrained product overview, so a stranger immediately understands that it shows Claude and Codex output token speed in a small Windows taskbar or floating widget.
+Invariants: preserve the screenshots' UI layout, labels, numerical values, proportions, icons and graph shapes exactly. Do not invent app controls, dashboards, windows or features. Keep all panels frontal with no perspective rotation or skew. The software is a small utility, not a full analytics dashboard.
+Design: generous whitespace on a dark graphite canvas, subtle mint and lavender accents matching the screenshots, crisp flat typography, quiet editorial design. Use one full settings screenshot at right at readable size, and two wide monitor screenshots stacked at left in their own clearly labeled areas. Product name and brief descriptive copy above the left widgets. Show that the widget is compact while magnifying its text for readability. Do not add fake Windows taskbar/system icons or third-party logos.
+Text outside screenshots, render verbatim in clean readable Chinese sans serif:
+Title: "Token Speed"
+Main subtitle, prominent: "Claude / Codex 输出速度，一眼可见"
+Short description: "Windows 任务栏与悬浮条 · 最近 20 轮速度曲线"
+Label above dark widget: "深色悬浮条"
+Label above light widget: "浅色悬浮条"
+Label above settings screenshot: "按你的习惯调整"
+Bottom note: "基于 CC Switch 已完成请求记录 · 示例数据"
+No extra text, no version badge, no download CTA, no watermark, no glowing orb, no people, no device frame. Keep screenshot strings legible and faithful. Output a single finished banner with opaque background.

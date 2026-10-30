@@ -1,0 +1,11 @@
+{
+  "version": "0.6.0",
+  "sourceCommit": "9cc501618cf7eefab99fe125141d6816c817373c",
+  "capturedAt": "2026-10-30T18:10:10+0800",
+  "data": "Synthetic demo records; no user database or desktop content is captured.",
+  "sourceHashes": {
+    "app.js": "2162d3a41036a238830533fc40a587f89aba9fcc8fa7b3bd72bb35715fdac592",
+    "styles.css": "ebd555fbd8deaed011f546ba4ba6154f18a6cc73675cc6618285d5ec29edf86d",
+    "index.html": "6daf2a04fb5768bd819b18aad5e4e755f0ffb27f215dadd371786fdc824a5814"
+  }
+}

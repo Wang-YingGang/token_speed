@@ -8,6 +8,8 @@ pub struct TaskbarSettings {
     pub display_mode: String,
     pub offset: i32,
     pub window_mode: String,
+    pub monitor_target: String,
+    pub horizontal_anchor: String,
     pub show_chart: bool,
     pub font_size: u32,
     pub opacity: u32,
@@ -15,6 +17,8 @@ pub struct TaskbarSettings {
     pub position_locked: bool,
     pub idle_after_seconds: u32,
     pub chart_width: u32,
+    pub show_session_output: bool,
+    pub session_output_width: u32,
     pub theme: String,
     pub floating_x: Option<i32>,
     pub floating_y: Option<i32>,
@@ -26,6 +30,8 @@ impl Default for TaskbarSettings {
             display_mode: "both".into(),
             offset: 0,
             window_mode: "taskbar".into(),
+            monitor_target: "primary".into(),
+            horizontal_anchor: "right".into(),
             show_chart: true,
             font_size: 11,
             opacity: 92,
@@ -33,6 +39,8 @@ impl Default for TaskbarSettings {
             position_locked: false,
             idle_after_seconds: 15,
             chart_width: 40,
+            show_session_output: true,
+            session_output_width: 220,
             theme: "dark".into(),
             floating_x: None,
             floating_y: None,
@@ -44,12 +52,18 @@ impl TaskbarSettings {
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(self.display_mode.as_str(), "both" | "claude" | "codex")
             || !matches!(self.window_mode.as_str(), "taskbar" | "floating")
+            || !matches!(
+                self.monitor_target.as_str(),
+                "primary" | "secondary" | "all"
+            )
+            || !matches!(self.horizontal_anchor.as_str(), "left" | "right")
             || !matches!(self.theme.as_str(), "dark" | "light")
             || !(10..=16).contains(&self.font_size)
             || !(30..=100).contains(&self.opacity)
             || !(-5_000..=5_000).contains(&self.offset)
             || !matches!(self.idle_after_seconds, 15 | 30 | 60)
             || !(24..=80).contains(&self.chart_width)
+            || !(120..=360).contains(&self.session_output_width)
         {
             return Err("设置值超出支持范围".into());
         }
@@ -63,7 +77,11 @@ impl TaskbarSettings {
             50.0
         } * self.font_size as f64
             / 11.0;
-        text + if self.show_chart {
+        text + if self.show_session_output {
+            self.session_output_width as f64 + 8.0
+        } else {
+            0.0
+        } + if self.show_chart {
             self.chart_width as f64
         } else {
             0.0
@@ -134,13 +152,83 @@ pub fn persist_taskbar_settings(settings: &TaskbarSettings) -> Result<(), String
     std::fs::rename(&temporary, &path).map_err(|e| e.to_string())
 }
 
-pub fn apply_window_settings(
+fn clamp_floating_position(
+    target: PhysicalPosition<i32>,
+    screen_position: PhysicalPosition<i32>,
+    screen_size: tauri::PhysicalSize<u32>,
+    window_size: tauri::PhysicalSize<u32>,
+) -> PhysicalPosition<i32> {
+    let max_x = screen_position.x + screen_size.width.saturating_sub(window_size.width) as i32;
+    let max_y = screen_position.y + screen_size.height.saturating_sub(window_size.height) as i32;
+    PhysicalPosition::new(
+        target.x.clamp(screen_position.x, max_x),
+        target.y.clamp(screen_position.y, max_y),
+    )
+}
+
+pub fn remember_floating_position(window: &WebviewWindow, settings: &mut TaskbarSettings) {
+    if settings.window_mode == "floating" {
+        if let Ok(position) = window.outer_position() {
+            settings.floating_x = Some(position.x);
+            settings.floating_y = Some(position.y);
+        }
+    }
+}
+
+fn same_monitor(left: &tauri::Monitor, right: &tauri::Monitor) -> bool {
+    left.position() == right.position() && left.size() == right.size()
+}
+
+pub fn has_secondary_monitor(window: &WebviewWindow) -> bool {
+    let Ok(primary) = window.primary_monitor() else {
+        return false;
+    };
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+    monitors.iter().any(|monitor| {
+        primary
+            .as_ref()
+            .map(|primary| !same_monitor(primary, monitor))
+            .unwrap_or(true)
+    })
+}
+
+fn choose_monitor(
+    window: &WebviewWindow,
+    secondary: bool,
+) -> tauri::Result<Option<tauri::Monitor>> {
+    let primary = window.primary_monitor()?;
+    let monitors = window.available_monitors()?;
+    if secondary {
+        let fallback = primary.clone().or_else(|| monitors.first().cloned());
+        return Ok(monitors
+            .into_iter()
+            .find(|monitor| {
+                primary
+                    .as_ref()
+                    .map(|primary| !same_monitor(primary, monitor))
+                    .unwrap_or(true)
+            })
+            .or(fallback));
+    }
+    Ok(primary.or_else(|| monitors.first().cloned()))
+}
+
+fn apply_window_settings_on(
     window: &WebviewWindow,
     settings: &TaskbarSettings,
+    secondary: bool,
 ) -> Result<(), String> {
     if settings.window_mode == "taskbar" {
         window.set_always_on_top(false).map_err(|e| e.to_string())?;
-        crate::taskbar::embed_taskbar(window, settings.offset, settings.width())
+        crate::taskbar::embed_taskbar(
+            window,
+            settings.offset,
+            settings.width(),
+            settings.horizontal_anchor == "right",
+            secondary,
+        )
     } else {
         crate::taskbar::detach_taskbar(window)?;
         window
@@ -152,38 +240,57 @@ pub fn apply_window_settings(
         window
             .set_always_on_top(settings.always_on_top)
             .map_err(|e| e.to_string())?;
-        let monitors = window.available_monitors().map_err(|e| e.to_string())?;
-        let current_monitor = window.current_monitor().map_err(|e| e.to_string())?;
         let size = window.outer_size().map_err(|e| e.to_string())?;
         let target = settings.floating_x.zip(settings.floating_y);
-        let monitor = monitors
-            .iter()
-            .find(|m| {
-                let a = m.work_area();
-                target.is_some_and(|(x, y)| {
-                    x >= a.position.x
-                        && x < a.position.x + a.size.width as i32
-                        && y >= a.position.y
-                        && y < a.position.y + a.size.height as i32
-                })
-            })
-            .or(current_monitor.as_ref())
-            .or_else(|| monitors.first());
+        let monitor = choose_monitor(window, secondary)
+            .map_err(|e| e.to_string())?
+            .or_else(|| window.current_monitor().ok().flatten());
         if let Some(monitor) = monitor {
+            // New windows start above the taskbar. Saved positions may overlap
+            // the taskbar, so only the full screen bounds constrain restoration.
             let a = monitor.work_area();
-            let max_x = (a.position.x + a.size.width as i32 - size.width as i32).max(a.position.x);
-            let max_y =
-                (a.position.y + a.size.height as i32 - size.height as i32).max(a.position.y);
-            let (x, y) = target.unwrap_or((max_x - 16, max_y - 16));
+            let default_x = a.position.x + a.size.width.saturating_sub(size.width + 16) as i32;
+            let default_y = a.position.y + a.size.height.saturating_sub(size.height + 16) as i32;
+            let (x, y) = target.unwrap_or((default_x, default_y));
+            let position = clamp_floating_position(
+                PhysicalPosition::new(x, y),
+                *monitor.position(),
+                *monitor.size(),
+                size,
+            );
             window
-                .set_position(Position::Physical(PhysicalPosition::new(
-                    x.clamp(a.position.x, max_x),
-                    y.clamp(a.position.y, max_y),
-                )))
+                .set_position(Position::Physical(position))
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
+}
+
+pub fn apply_window_settings(
+    window: &WebviewWindow,
+    settings: &TaskbarSettings,
+) -> Result<(), String> {
+    apply_window_settings_on(window, settings, settings.monitor_target == "secondary")
+}
+
+pub fn sync_secondary_window(app: &AppHandle, settings: &TaskbarSettings) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("monitor-secondary") else {
+        return Ok(());
+    };
+    let main_visible = app
+        .get_webview_window("main")
+        .and_then(|main| main.is_visible().ok())
+        .unwrap_or(false);
+    let should_show =
+        settings.monitor_target == "all" && main_visible && has_secondary_monitor(&window);
+    if !should_show {
+        if window.is_visible().unwrap_or(false) {
+            window.hide().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    apply_window_settings_on(&window, settings, true)?;
+    window.show().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -201,6 +308,8 @@ pub fn get_taskbar_settings(
 pub struct SettingsPatch {
     display_mode: Option<String>,
     window_mode: Option<String>,
+    monitor_target: Option<String>,
+    horizontal_anchor: Option<String>,
     show_chart: Option<bool>,
     font_size: Option<u32>,
     opacity: Option<u32>,
@@ -209,6 +318,8 @@ pub struct SettingsPatch {
     theme: Option<String>,
     idle_after_seconds: Option<u32>,
     chart_width: Option<u32>,
+    show_session_output: Option<bool>,
+    session_output_width: Option<u32>,
     offset: Option<i32>,
 }
 
@@ -224,6 +335,8 @@ pub fn set_monitor_settings(
     apply!(
         display_mode,
         window_mode,
+        monitor_target,
+        horizontal_anchor,
         show_chart,
         font_size,
         opacity,
@@ -232,14 +345,33 @@ pub fn set_monitor_settings(
         theme,
         idle_after_seconds,
         chart_width,
+        show_session_output,
+        session_output_width,
         offset
     );
     next.validate()?;
     let window = app.get_webview_window("main").ok_or("监控窗口不存在")?;
-    if let Err(error) =
-        apply_window_settings(&window, &next).and_then(|_| persist_taskbar_settings(&next))
+    if current.monitor_target != next.monitor_target
+        || current.horizontal_anchor != next.horizontal_anchor
     {
+        next.offset = 0;
+        next.floating_x = None;
+        next.floating_y = None;
+    }
+    // A native move event may still be queued when a settings change arrives.
+    // Read the current position before resizing instead of restoring stale data.
+    if current.window_mode == "floating" {
+        if let Ok(position) = window.outer_position() {
+            next.floating_x = Some(position.x);
+            next.floating_y = Some(position.y);
+        }
+    }
+    if let Err(error) = apply_window_settings(&window, &next).and_then(|_| {
+        remember_floating_position(&window, &mut next);
+        sync_secondary_window(&app, &next).and_then(|_| persist_taskbar_settings(&next))
+    }) {
         let _ = apply_window_settings(&window, &current);
+        let _ = sync_secondary_window(&app, &current);
         return Err(error);
     }
     *current = next.clone();
@@ -279,6 +411,7 @@ pub fn set_taskbar_offset(
             apply_window_settings(&window, &next)?;
         }
     }
+    sync_secondary_window(&app, &next)?;
     if persist {
         persist_taskbar_settings(&next)?;
     }
@@ -300,7 +433,9 @@ pub fn reset_monitor_position(
     next.floating_y = None;
     if let Some(window) = app.get_webview_window("main") {
         apply_window_settings(&window, &next)?;
+        remember_floating_position(&window, &mut next);
     }
+    sync_secondary_window(&app, &next)?;
     persist_taskbar_settings(&next)?;
     *current = next.clone();
     app.emit("taskbar-settings", &next)
@@ -333,6 +468,8 @@ mod tests {
         assert_eq!(s.display_mode, "codex");
         assert_eq!(s.window_mode, "taskbar");
         assert!(s.show_chart);
+        assert!(s.show_session_output);
+        assert_eq!(s.session_output_width, 220);
         s.validate().unwrap();
     }
     #[test]
@@ -347,11 +484,23 @@ mod tests {
     #[test]
     fn single_app_does_not_reserve_name_space() {
         let mut s = TaskbarSettings::default();
+        s.show_session_output = false;
         assert_eq!(s.width(), 142.0);
         s.display_mode = "codex".into();
         assert_eq!(s.width(), 104.0);
         s.display_mode = "claude".into();
         assert_eq!(s.width(), 104.0);
+    }
+    #[test]
+    fn inline_output_width_is_reserved_and_validated() {
+        let mut s = TaskbarSettings::default();
+        assert_eq!(s.width(), 370.0);
+        s.show_session_output = false;
+        assert_eq!(s.width(), 142.0);
+        s.session_output_width = 361;
+        assert!(s.validate().is_err());
+        s.session_output_width = 119;
+        assert!(s.validate().is_err());
     }
     #[test]
     fn floating_sizes_fit_each_configuration() {
@@ -363,5 +512,42 @@ mod tests {
         assert!(s.width() >= 134.0);
         s.font_size = 16;
         assert!(s.height() >= 54.0);
+    }
+    #[test]
+    fn floating_positions_can_overlap_each_taskbar_edge() {
+        let screen = PhysicalPosition::new(0, 0);
+        let size = tauri::PhysicalSize::new(1920, 1080);
+        let window = tauri::PhysicalSize::new(200, 34);
+        for (x, y) in [(400, 1040), (400, 0), (0, 400), (1720, 400)] {
+            let target = PhysicalPosition::new(x, y);
+            assert_eq!(
+                clamp_floating_position(target, screen, size, window),
+                target
+            );
+        }
+    }
+    #[test]
+    fn floating_positions_are_clamped_only_at_full_screen_edges() {
+        let position = clamp_floating_position(
+            PhysicalPosition::new(1900, 1070),
+            PhysicalPosition::new(0, 0),
+            tauri::PhysicalSize::new(1920, 1080),
+            tauri::PhysicalSize::new(200, 34),
+        );
+        assert_eq!(position, PhysicalPosition::new(1720, 1046));
+        let negative_monitor = clamp_floating_position(
+            PhysicalPosition::new(-1500, 1040),
+            PhysicalPosition::new(-1920, 0),
+            tauri::PhysicalSize::new(1920, 1080),
+            tauri::PhysicalSize::new(200, 34),
+        );
+        assert_eq!(negative_monitor, PhysicalPosition::new(-1500, 1040));
+        let oversized = clamp_floating_position(
+            PhysicalPosition::new(100, 100),
+            PhysicalPosition::new(-100, -100),
+            tauri::PhysicalSize::new(100, 80),
+            tauri::PhysicalSize::new(200, 120),
+        );
+        assert_eq!(oversized, PhysicalPosition::new(-100, -100));
     }
 }

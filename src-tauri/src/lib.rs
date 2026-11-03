@@ -1,3 +1,4 @@
+mod sessions;
 mod settings;
 mod taskbar;
 use settings::*;
@@ -15,11 +16,11 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, Size, WebviewWindow,
-    WindowEvent,
+    WebviewWindowBuilder, WindowEvent,
 };
 
 const SETTINGS_WIDTH: f64 = 344.0;
-const SETTINGS_HEIGHT: f64 = 510.0;
+const SETTINGS_HEIGHT: f64 = 574.0;
 const HISTORY_LIMIT: usize = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,7 +294,10 @@ fn hide_settings(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    if let Ok(settings) = app.state::<RwLock<TaskbarSettings>>().read() {
+    if let Ok(mut settings) = app.state::<RwLock<TaskbarSettings>>().write() {
+        if let Some(window) = app.get_webview_window("main") {
+            remember_floating_position(&window, &mut settings);
+        }
         let _ = persist_taskbar_settings(&settings);
     }
     app.exit(0);
@@ -304,7 +308,10 @@ fn show_panel(window: WebviewWindow) -> Result<(), String> {
     let settings = window.state::<RwLock<TaskbarSettings>>();
     let settings = settings.read().map_err(|_| "无法读取设置".to_string())?;
     apply_window_settings(&window, &settings)?;
-    window.show().map_err(|error| error.to_string())
+    window
+        .show()
+        .map_err(|error| error.to_string())
+        .and_then(|()| sync_secondary_window(window.app_handle(), &settings))
 }
 
 #[cfg(windows)]
@@ -451,8 +458,20 @@ fn spawn_taskbar_watcher(window: WebviewWindow) {
             let Ok(settings) = state.read() else {
                 continue;
             };
-            if window.is_visible().unwrap_or(false) && settings.window_mode == "taskbar" {
-                let _ = taskbar::embed_taskbar(&window, settings.offset, settings.width());
+            if window.is_visible().unwrap_or(false) {
+                if settings.window_mode == "taskbar" {
+                    let _ = taskbar::embed_taskbar(
+                        &window,
+                        settings.offset,
+                        settings.width(),
+                        settings.horizontal_anchor == "right",
+                        settings.monitor_target == "secondary",
+                    );
+                } else if settings.window_mode == "floating" {
+                    let _ = taskbar::maintain_floating_topmost(&window);
+                }
+                let app = window.app_handle().clone();
+                let _ = sync_secondary_window(&app, &settings);
             }
             if last_saved.as_ref() != Some(&*settings) {
                 if persist_taskbar_settings(&settings).is_ok() {
@@ -468,8 +487,10 @@ pub fn run() {
     let taskbar_settings = load_taskbar_settings();
     tauri::Builder::default()
         .manage(RwLock::new(taskbar_settings))
+        .manage(RwLock::new(sessions::SessionSnapshot::default()))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            sessions::get_sessions,
             get_monitor_geometry,
             get_taskbar_settings,
             set_monitor_settings,
@@ -486,6 +507,16 @@ pub fn run() {
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
+            let mut secondary_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == "main")
+                .cloned()
+                .expect("main window config");
+            secondary_config.label = "monitor-secondary".into();
+            WebviewWindowBuilder::from_config(app, &secondary_config)?.build()?;
             {
                 let state = app.state::<RwLock<TaskbarSettings>>();
                 let mut settings = state.write().map_err(|_| "无法读取设置")?;
@@ -496,8 +527,16 @@ pub fn run() {
                     settings.window_mode = "floating".into();
                     apply_window_settings(&window, &settings)?;
                 }
+                remember_floating_position(&window, &mut settings);
             }
             window.show()?;
+            {
+                let state = app.state::<RwLock<TaskbarSettings>>();
+                let settings = state.read().map_err(|_| "无法读取设置")?;
+                let app_handle = app.handle().clone();
+                sync_secondary_window(&app_handle, &settings)?;
+            }
+            taskbar::watch_z_order(window.clone());
             spawn_taskbar_watcher(window);
 
             let show_item = MenuItem::with_id(app, "show", "显示 / 隐藏", true, None::<&str>)?;
@@ -519,12 +558,16 @@ pub fn run() {
                         let _ = show_settings(tray.app_handle().clone());
                     }
                 })
-                .tooltip("Token Speed — CC Switch 用量监控")
+                .tooltip("Token Speed — 会话输出与速度监控")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
+                                if let Some(secondary) = app.get_webview_window("monitor-secondary")
+                                {
+                                    let _ = secondary.hide();
+                                }
                                 if let Some(settings_window) = app.get_webview_window("settings") {
                                     let _ = settings_window.hide();
                                 }
@@ -536,7 +579,7 @@ pub fn run() {
                     "settings" => {
                         let _ = show_settings(app.clone());
                     }
-                    "quit" => app.exit(0),
+                    "quit" => quit_app(app.clone()),
                     _ => {}
                 });
             if let Some(icon) = app.default_window_icon() {
@@ -545,6 +588,7 @@ pub fn run() {
             tray.build(app)?;
 
             spawn_database_watcher(app.handle().clone());
+            sessions::spawn(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

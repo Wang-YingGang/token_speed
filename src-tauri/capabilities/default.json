@@ -4,7 +4,8 @@
   "description": "Core access for monitor and settings windows",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "monitor-secondary"
   ],
   "permissions": [
     "core:default",

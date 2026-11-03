@@ -106,4 +106,20 @@ h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.2px; }
 .chart-axis { fill: none; stroke: currentColor; stroke-opacity: .5; stroke-width: .6; vector-effect: non-scaling-stroke; }
 .chart-tick { fill: currentColor; opacity: .8; font-size: 6px; font-variant-numeric: tabular-nums; }
 .taskbar-row.is-idle .taskbar-sparkline { opacity: .5; }
+.session-inline { flex: 0 0 var(--session-output-width, 220px); display: flex; align-items: center; align-self: stretch; gap: 6px; min-width: 0; margin-left: auto; padding-left: 8px; border-left: 1px solid #a4b4ce35; font-size: calc(var(--monitor-font) - 1px); line-height: 1.5; }
+.session-project { flex: 0 1 auto; max-width: 82px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #9fb6ce; }
+.session-viewport { display: flex; align-items: center; align-self: stretch; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-align: left; }
+.session-output { display: block; flex: 0 0 auto; color: #d8e0eb; }
+.session-inline.is-empty .session-output { color: #8996a8; }
+.has-session-output .taskbar-sparkline { flex: 0 0 var(--chart-width, 40px); width: var(--chart-width, 40px); }
+[data-session-status="running"] .session-project { color: #8de4ce; }
+[data-session-status="active"] .session-project { color: #c1c8ed; }
+.session-output.is-scrolling { animation: session-scroll var(--scroll-duration, 15s) linear infinite alternate; }
+.compact-main:hover .session-output { animation-play-state: paused; }
+.floating-window.light-monitor .session-output { color: #33445a; }
+.floating-window.light-monitor .session-project { color: #007e68; }
+.floating-window.light-monitor .session-inline.is-empty .session-output { color: #76849a; }
+.floating-window.light-monitor .session-inline { border-color: #344c6b33; }
+@keyframes session-scroll { 0%, 12% { transform: translateX(0); } 88%, 100% { transform: translateX(calc(-1 * var(--scroll-distance))); } }
+@media (prefers-reduced-motion: reduce) { .session-output.is-scrolling { animation: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }

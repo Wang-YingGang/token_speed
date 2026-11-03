@@ -1,5 +1,6 @@
 import { ActivityTracker, recordTime } from "./activity.js";
 import { speedChart } from "./chart.js";
+import { SessionRotation, sessionCandidates, sessionOutput, statusLabel, durationLabel } from "./session-format.js";
 
 const tauri = window.__TAURI__;
 const isSettings = tauri?.window.getCurrentWindow().label === "settings";
@@ -7,10 +8,15 @@ const slot = document.querySelector("#display-slot");
 const compactMain = document.querySelector("#compact-main");
 const activity = new ActivityTracker();
 let snapshot = { apps: [{ appType: "claude", latest: null, history: [] }, { appType: "codex", latest: null, history: [] }], databaseFound: false };
+let sessionSnapshot = { sessions: [], sources: [] };
+const sessionRotation = new SessionRotation();
+let sessionRevision = 0;
+let monitorContentKey = "";
 let config = { displayMode: "both", windowMode: "taskbar", showChart: true, chartWidth: 40, fontSize: 11, opacity: 92,
-  alwaysOnTop: true, positionLocked: false, theme: "dark", idleAfterSeconds: 15, offset: 0 };
+  alwaysOnTop: true, positionLocked: false, theme: "dark", idleAfterSeconds: 15, offset: 0,
+  monitorTarget: "primary", horizontalAnchor: "right",
+  showSessionOutput: true, sessionOutputWidth: 220 };
 let geometry = null;
-let renderKey = "";
 let feedbackTimer;
 let drag = null;
 let floatingPointer = null;
@@ -18,7 +24,9 @@ let suppressClick = false;
 let saveQueue = Promise.resolve();
 const controls = { "display-mode": "displayMode", "window-mode": "windowMode", "show-chart": "showChart", "font-size": "fontSize",
   opacity: "opacity", "always-on-top": "alwaysOnTop", "position-locked": "positionLocked", theme: "theme",
-  "idle-after-seconds": "idleAfterSeconds", "chart-width": "chartWidth", "taskbar-offset": "offset" };
+  "idle-after-seconds": "idleAfterSeconds", "chart-width": "chartWidth", "taskbar-offset": "offset",
+  "show-session-output": "showSessionOutput", "session-output-width": "sessionOutputWidth",
+  "monitor-target": "monitorTarget", "horizontal-anchor": "horizontalAnchor" };
 
 document.querySelector("#monitor").hidden = isSettings;
 document.querySelector("#settings-panel").hidden = !isSettings;
@@ -36,24 +44,67 @@ function recordDescription(app) {
 function renderMonitor() {
   if (isSettings) return;
   const types = config.displayMode === "both" ? ["claude", "codex"] : [config.displayMode];
-  slot.replaceChildren(...types.map((type) => {
+  const rows = types.map((type) => {
     const app = snapshot.apps.find((a) => a.appType === type);
     const status = activity.status(app, config.idleAfterSeconds);
+    const sessions = sessionCandidates(sessionSnapshot.sessions, type, config.idleAfterSeconds);
+    const session = sessionRotation.current(type, sessions);
+    const output = session ? sessionOutput(session) : "";
+    return { type, app, status, sessions, session, output };
+  });
+  // Log heartbeats must not restart a long text's scrolling animation.
+  const key = JSON.stringify([config, rows.map(({type,app,status,sessions,session,output}) =>
+    [type,app,status,sessions.map((s) => s.id),session?.id,session?.status,session?.project,output]), sessionSnapshot.sources]);
+  if (key === monitorContentKey) return;
+  monitorContentKey = key;
+  slot.replaceChildren(...rows.map(({ type, app, status, sessions, session, output }) => {
     const row = document.createElement("span");
     row.className = `taskbar-row ${type} ${status === "recent" ? "is-recent" : "is-idle"}`;
     row.dataset.appType = type; row.dataset.status = status;
+    row.dataset.sessionStatus = session?.status || "empty";
     const label = document.createElement("span"); label.className = "taskbar-app-label"; label.textContent = type === "codex" ? "Codex" : "Claude";
     const speed = document.createElement("span"); speed.className = "taskbar-speed";
     speed.textContent = status === "recent" ? formatSpeed(app.latest.outputTps) : status === "empty" ? "暂无" : "待机";
     if (status === "recent") { const unit = document.createElement("small"); unit.textContent = "t/s"; speed.append(unit); }
     if (config.displayMode === "both") row.append(label);
     row.append(speed);
-    row.title = `${status === "recent" ? "刚收到完成记录" : status === "idle" ? "等待新记录" : "暂无数据"}\n${recordDescription(app)}\n完成速度不是实时生成状态 · 单击或右键设置`;
+    row.title = recordDescription(app);
     if (config.showChart && app?.history?.length) row.append(speedChart(app, config.chartWidth));
+    if (config.showSessionOutput) {
+      const inline = document.createElement("span"); inline.className = "session-inline";
+      const project = document.createElement("span"); project.className = "session-project";
+      const viewport = document.createElement("span"); viewport.className = "session-viewport";
+      const text = document.createElement("span"); text.className = "session-output";
+      if (session) {
+        inline.dataset.sessionId = session.id;
+        project.textContent = `${session.project}${sessions.length > 1 ? ` ${sessions.indexOf(session) + 1}/${sessions.length}` : ""}`;
+        text.textContent = output.replace(/\s+/g, " ").trim().slice(0, 600);
+        inline.title = `${session.project} · ${statusLabel(session.status)}${session.startedAt ? ` · ${durationLabel(session.startedAt)}` : ""}\n${output.slice(0, 2000)}${sessions.length > 1 ? "\n每 8 秒切换会话 · 滚轮手动切换" : ""}\n悬停暂停滚动 · 随完整消息更新`;
+        row.title += `\n${inline.title}`;
+      } else {
+        const source = sessionSnapshot.sources.find((s) => s.appType === type);
+        text.textContent = source?.error ? "日志读取失败" : source && !source.available ? "未找到会话记录" : "等待会话输出";
+        inline.classList.add("is-empty");
+        inline.title = source?.error || source?.path || "开始任务后，最新输出会直接显示在这里";
+      }
+      viewport.append(text); inline.append(project, viewport); row.append(inline);
+    }
+    row.title += "\n单击或右键设置 · 拖动移动";
     return row;
   }));
   slot.classList.toggle("single", types.length === 1);
-  renderKey = snapshot.apps.map((app) => activity.status(app,config.idleAfterSeconds)).join();
+  document.body.classList.toggle("has-session-output", config.showSessionOutput);
+  requestAnimationFrame(() => {
+    for (const viewport of slot.querySelectorAll(".session-viewport")) {
+      const text = viewport.firstElementChild;
+      const distance = Math.max(0, text.scrollWidth - viewport.clientWidth);
+      if (distance > 2) {
+        text.style.setProperty("--scroll-distance", `${distance}px`);
+        text.style.setProperty("--scroll-duration", `${Math.max(10, distance / 28 + 4)}s`);
+        text.classList.add("is-scrolling");
+      }
+    }
+  });
 }
 function renderDatabase() {
   const status = document.querySelector("#database-status");
@@ -84,16 +135,19 @@ function applySettings(value) {
   document.body.classList.toggle("position-locked",config.positionLocked);
   document.documentElement.style.setProperty("--monitor-font",`${config.fontSize}px`);
   document.documentElement.style.setProperty("--monitor-opacity",config.opacity/100);
+  document.documentElement.style.setProperty("--session-output-width",`${config.sessionOutputWidth}px`);
+  document.documentElement.style.setProperty("--chart-width",`${config.chartWidth}px`);
   for (const [id,key] of Object.entries(controls)) {
     const control = document.getElementById(id);
     if (control.type === "checkbox") control.checked = Boolean(config[key]); else control.value = config[key];
   }
-  for (const [id,value] of [["font-size",config.fontSize],["opacity",config.opacity],["chart-width",config.chartWidth]]) {
+  for (const [id,value] of [["font-size",config.fontSize],["opacity",config.opacity],["chart-width",config.chartWidth],["session-output-width",config.sessionOutputWidth]]) {
     document.getElementById(`${id}-value`).value = `${value}${id === "opacity" ? "%" : " px"}`;
   }
   document.querySelectorAll(".floating-setting input, .floating-setting select").forEach((e) => { e.disabled = config.windowMode !== "floating"; });
   document.querySelectorAll(".taskbar-setting input, .taskbar-setting button").forEach((e) => { e.disabled = config.windowMode !== "taskbar"; });
   document.querySelector("#chart-width").disabled = !config.showChart;
+  document.querySelector("#session-output-width").disabled = !config.showSessionOutput;
   document.querySelector("#floating-hint").textContent = config.windowMode === "floating" ? "当前已启用" : "悬浮模式可用";
   renderMonitor(); refreshGeometry();
 }
@@ -161,10 +215,26 @@ compactMain.addEventListener("click",(event) => {
   openSettings();
 });
 compactMain.addEventListener("contextmenu",(event) => { event.preventDefault(); openSettings(); });
+compactMain.addEventListener("wheel", (event) => {
+  const row = event.target.closest(".taskbar-row");
+  if (!row || !config.showSessionOutput || event.deltaY === 0) return;
+  const sessions = sessionCandidates(sessionSnapshot.sessions, row.dataset.appType, config.idleAfterSeconds);
+  if (sessions.length < 2) return;
+  event.preventDefault();
+  sessionRotation.next(row.dataset.appType, sessions, event.deltaY > 0 ? 1 : -1);
+  renderMonitor();
+}, { passive: false });
+setInterval(() => {
+  if (isSettings || !config.showSessionOutput || compactMain.matches(":hover") || drag || floatingPointer) return;
+  for (const type of ["claude", "codex"]) {
+    sessionRotation.next(type, sessionCandidates(sessionSnapshot.sessions, type, config.idleAfterSeconds));
+  }
+  renderMonitor();
+}, 8000);
 document.addEventListener("keydown",(event) => { if (event.key === "Escape" && isSettings) closeSettings(); });
 compactMain.addEventListener("pointerdown",(event) => {
   suppressClick = false;
-  if (isSettings || event.button !== 0 || config.positionLocked) return;
+  if (isSettings || event.button !== 0 || config.positionLocked || config.monitorTarget === "all") return;
   if (config.windowMode === "floating") { floatingPointer = {x:event.clientX,y:event.clientY}; return; }
   const offset = config.offset;
   drag = { pointerId:event.pointerId,startX:event.screenX,startOffset:offset,offset,moved:false };
@@ -207,21 +277,25 @@ autostart.addEventListener("change",async () => {
 });
 setInterval(() => {
   if (isSettings) return;
-  const key = snapshot.apps.map((app) => activity.status(app,config.idleAfterSeconds)).join();
-  if (key !== renderKey) renderMonitor();
+  renderMonitor();
 },500);
 async function initialize() {
   renderMonitor(); renderDatabase();
   if (!tauri) return;
   await tauri.event.listen("usage-changed",(event) => applySnapshot(event.payload));
+  await tauri.event.listen("sessions-changed",(event) => { sessionRevision++; sessionSnapshot = event.payload; renderMonitor(); });
   await tauri.event.listen("taskbar-settings",(event) => applySettings(event.payload));
   await tauri.event.listen("activity-tick",() => {
-    if (!isSettings && snapshot.apps.map((app) => activity.status(app,config.idleAfterSeconds)).join() !== renderKey) renderMonitor();
+    renderMonitor();
   });
   // Refresh numeric geometry each time a hidden settings window is reopened.
   await tauri.window.getCurrentWindow().onFocusChanged(({payload}) => { if (payload && isSettings) refreshGeometry(); });
   applySettings(await tauri.core.invoke("get_taskbar_settings"));
   applySnapshot(await tauri.core.invoke("get_snapshot"));
+  const requestedRevision = sessionRevision;
+  const initialSessions = await tauri.core.invoke("get_sessions");
+  if (sessionRevision === requestedRevision) sessionSnapshot = initialSessions;
+  renderMonitor();
   autostart.checked = await tauri.core.invoke("get_autostart");
 }
 initialize().catch((error) => { console.error("初始化失败",error); if (isSettings) feedback(String(error),true); });

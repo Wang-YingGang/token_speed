@@ -8,7 +8,7 @@
 </head>
 <body>
   <main id="monitor" class="monitor">
-    <button id="compact-main" class="compact-main" type="button" aria-label="打开 Token Speed 设置" title="拖动移动 · 单击设置">
+    <button id="compact-main" class="compact-main" type="button" aria-label="Token Speed 速度与会话输出，单击设置" title="拖动移动 · 单击设置 · 滚轮切换会话">
       <span id="display-slot" class="display-slot" aria-live="polite"></span>
     </button>
     <button id="settings-button" class="icon-button" type="button" aria-label="打开设置" title="设置">
@@ -31,6 +31,8 @@
         <div class="group-heading"><span>监控条</span><span id="monitor-width" class="muted">142 px</span></div>
         <div class="settings-group">
           <div class="setting-row"><label for="window-mode">显示位置</label><select id="window-mode"><option value="taskbar">任务栏</option><option value="floating">桌面悬浮条</option></select></div>
+          <div class="setting-row"><label for="monitor-target">目标显示器</label><select id="monitor-target"><option value="primary">主显示器</option><option value="secondary">其他显示器</option><option value="all">所有显示器</option></select></div>
+          <div class="setting-row"><label for="horizontal-anchor">停靠边</label><select id="horizontal-anchor"><option value="left">最左侧</option><option value="right">最右侧</option></select></div>
           <div class="setting-row"><label for="display-mode"><span class="app-pair" aria-hidden="true"><i></i><i></i></span>显示应用</label><select id="display-mode"><option value="both">Claude + Codex</option><option value="claude">仅 Claude</option><option value="codex">仅 Codex</option></select></div>
           <div class="setting-row"><label for="font-size">文字大小</label><div class="range-control"><input id="font-size" type="range" min="10" max="16" value="11" /><output id="font-size-value" for="font-size">11 px</output></div></div>
         </div>
@@ -39,6 +41,11 @@
           <div class="setting-row"><label for="show-chart">显示曲线</label><label class="toggle-control"><input id="show-chart" type="checkbox" checked /><span class="switch" aria-hidden="true"></span></label></div>
           <div class="setting-row"><label for="chart-width">曲线宽度</label><div class="range-control"><input id="chart-width" type="range" min="24" max="80" value="40" /><output id="chart-width-value" for="chart-width">40 px</output></div></div>
           <div class="setting-row"><label for="idle-after-seconds">完成速度保留</label><select id="idle-after-seconds"><option value="15">15 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></div>
+        </div>
+        <div class="group-heading"><span>会话输出</span><span class="muted">直接显示在监控条</span></div>
+        <div class="settings-group">
+          <div class="setting-row"><label for="show-session-output">显示当前输出</label><label class="toggle-control"><input id="show-session-output" type="checkbox" checked /><span class="switch" aria-hidden="true"></span></label></div>
+          <div class="setting-row"><label for="session-output-width">预览宽度</label><div class="range-control"><input id="session-output-width" type="range" min="120" max="360" step="10" value="220" /><output id="session-output-width-value" for="session-output-width">220 px</output></div></div>
         </div>
         <div class="group-heading"><span>位置微调</span><span id="monitor-geometry" class="muted">屏幕 X —</span></div>
         <div class="settings-group taskbar-setting position-group">
@@ -58,7 +65,7 @@
           <div class="setting-row"><label for="position-locked">锁定监控位置</label><label class="toggle-control"><input id="position-locked" type="checkbox" /><span class="switch" aria-hidden="true"></span></label></div>
           <div class="setting-row"><label for="autostart-toggle">开机启动</label><label class="toggle-control"><input id="autostart-toggle" type="checkbox" /><span class="switch" aria-hidden="true"></span></label></div>
         </div>
-        <div class="info-note"><span class="info-mark" aria-hidden="true">i</span><p>显示的是已完成请求的速度。保留时间结束后回到「待机」，悬停可查看上次结果。</p></div>
+        <div class="info-note"><span class="info-mark" aria-hidden="true">i</span><p>速度来自已完成请求；会话输出随本地日志更新。长文本自动滚动，悬停暂停；多个会话自动轮播，也可用滚轮切换。</p></div>
       </section>
     </div>
     <footer class="settings-footer">

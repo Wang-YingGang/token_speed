@@ -8,8 +8,10 @@
     "build": "tauri build",
     "test": "npm run test:rust && npm run test:ui",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "test:ui": "node tests/activity.test.mjs",
-    "test:native": "python settings_integration_check.py"
+    "test:ui": "node tests/activity.test.mjs && node tests/sessions.test.mjs",
+    "test:native": "python settings_integration_check.py",
+    "test:sessions": "python scripts/check-sessions.py",
+    "test:position": "python scripts/check-floating-position.py"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.8.0",

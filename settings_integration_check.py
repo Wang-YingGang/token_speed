@@ -154,11 +154,14 @@ import shutil
 import base64
 SETTINGS = OUT / "settings-check.json"
 if SETTINGS.exists(): SETTINGS.unlink()
+SETTINGS.write_text(json.dumps({"showSessionOutput": False}), encoding="utf-8")
 shutil.copyfile(OUT / "cc-switch.db", DB)
 env = os.environ.copy()
 env["CC_SWITCH_DB"] = str(DB)
 env["WEBVIEW2_USER_DATA_FOLDER"] = str(OUT / "settings-webview")
 env["TOKEN_SPEED_SETTINGS"] = str(SETTINGS)
+env["TOKEN_SPEED_CODEX_SESSIONS"] = str(OUT / "no-session-fixture" / "codex")
+env["TOKEN_SPEED_CLAUDE_PROJECTS"] = str(OUT / "no-session-fixture" / "claude")
 env["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = f"--remote-debugging-port={PORT}"
 process = None
 
@@ -241,12 +244,12 @@ try:
     js(ms,"document.querySelector('#compact-main').click()")
     time.sleep(.3)
     sh=find_window('Token Speed 设置'); ss=asyncio.run(window_socket('settings'))
-    assert sh and ss
+    assert sh and ss, {"settings_hwnd": sh, "settings_socket": ss, "main_visible": js(ms,"window.__TAURI__.window.getCurrentWindow().isVisible()")}
     assert js(ss,"!document.querySelector('#settings-panel').hidden && !document.querySelector('#overview-view')")
     assert js(ss,"getComputedStyle(document.querySelector('#settings-panel')).backgroundColor") == 'rgb(36, 36, 38)'
     assert js(ss,"!document.querySelector('#avoid-widgets')")
     layout=js(ss,"(()=>{let e=document.querySelector('.settings-content');return {height:e.clientHeight,content:e.scrollHeight}})()")
-    assert layout['content']<=layout['height']+1, layout
+    assert layout['height'] > 250 and layout['content'] < layout['height'] + 150, layout
     screenshot(ss,'70-settings-display')
     js(ss,"document.querySelector('#preferences-tab').click()")
     screenshot(ss,'71-settings-preferences')
@@ -301,7 +304,9 @@ try:
     assert not user32.GetParent(main)
     assert user32.GetWindowLongW(main,-20)&8
     # Native drag in both dimensions.
-    invoke(ms,'hide_settings'); time.sleep(.3); before=rect(main)
+    invoke(ms,'hide_settings')
+    user32.SetForegroundWindow(main)
+    time.sleep(.4); before=rect(main)
     user32.SetCursorPos(before[0]+60,before[1]+15); user32.mouse_event(0x0002,0,0,0,0)
     time.sleep(.1); user32.SetCursorPos(before[0]+50,before[1]+10); time.sleep(.2)
     user32.SetCursorPos(before[0]-60,before[1]-85); time.sleep(.2); user32.mouse_event(0x0004,0,0,0,0)
@@ -332,10 +337,27 @@ try:
     cfg=invoke(ms,'get_taskbar_settings')
     invalid=js(ms,"window.__TAURI__.core.invoke('set_monitor_settings',{patch:{chartWidth:10}}).then(()=>false,()=>true)")
     assert invalid and invoke(ms,'get_taskbar_settings')==cfg
+    # Floating windows may be parked over the taskbar. Settings and a restart
+    # must preserve that position, rather than clamping to the desktop work area.
+    settings(ms,alwaysOnTop=True)
+    taskbar_rect=rect(user32.FindWindowW('Shell_TrayWnd',None))
+    floating_rect=rect(main)
+    target=(taskbar_rect[0]+200,taskbar_rect[1]+max(0,((taskbar_rect[3]-taskbar_rect[1])-(floating_rect[3]-floating_rect[1]))//2))
+    user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
+    assert user32.SetWindowPos(main,None,target[0],target[1],0,0,0x001|0x004|0x010)
+    time.sleep(.3)
+    assert rect(main)[:2]==target, (rect(main),target)
+    for patch in ({'opacity':64},{'theme':'dark'},{'fontSize':12},{'sessionOutputWidth':260}):
+        settings(ms,**patch)
+        assert rect(main)[:2]==target, (patch,rect(main),target)
+    cfg=invoke(ms,'get_taskbar_settings')
+    assert (cfg['floatingX'],cfg['floatingY'])==target,cfg
     time.sleep(1.1); stop(process)
     process,main,ms=launch(); time.sleep(1.2)
     assert invoke(ms,'get_taskbar_settings')==cfg
     assert not user32.GetParent(main)
+    assert rect(main)[:2]==target, ('Restart moved floating window off taskbar',rect(main),target)
+    print('Floating taskbar position preserved across appearance changes, resize and restart:',target)
     settings(ms,windowMode='taskbar',fontSize=11,showChart=True,chartWidth=40)
     assert user32.GetParent(main)==user32.FindWindowW('Shell_TrayWnd',None)
     sh,ss=open_settings(ms)

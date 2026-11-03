@@ -13,6 +13,163 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 const TASKBAR_GAP_LOGICAL: f64 = 6.0;
 
+// A floating HWND_TOPMOST window can still fall behind the taskbar, which is
+// also topmost. Reassert its order only when an overlapping taskbar is above it.
+#[cfg(windows)]
+pub fn maintain_floating_topmost(window: &WebviewWindow) -> Result<(), String> {
+    use crate::settings::TaskbarSettings;
+    use std::sync::RwLock;
+    use tauri::Manager;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetWindow, IsWindowVisible, GW_HWNDPREV, HWND_TOPMOST, SWP_ASYNCWINDOWPOS,
+    };
+
+    let state = window.state::<RwLock<TaskbarSettings>>();
+    let Ok(settings) = state.try_read() else {
+        return Ok(());
+    };
+    let enabled = settings.window_mode == "floating" && settings.always_on_top;
+    drop(settings);
+    if !enabled {
+        return Ok(());
+    }
+    let hwnd = native_hwnd(window)?;
+    if !unsafe { IsWindowVisible(hwnd) }.as_bool() || unsafe { GetParent(hwnd) }.is_ok() {
+        return Ok(());
+    }
+    let floating = window_rect(hwnd)?;
+    let mut cursor = hwnd;
+    for _ in 0..4096 {
+        let Ok(above) = (unsafe { GetWindow(cursor, GW_HWNDPREV) }) else {
+            break;
+        };
+        cursor = above;
+        let mut class = [0u16; 64];
+        let length = unsafe { GetClassNameW(above, &mut class) } as usize;
+        let class = String::from_utf16_lossy(&class[..length]);
+        if !matches!(class.as_str(), "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
+            || !unsafe { IsWindowVisible(above) }.as_bool()
+        {
+            continue;
+        }
+        let Ok(taskbar) = window_rect(above) else {
+            continue;
+        };
+        if floating.left < taskbar.right
+            && floating.right > taskbar.left
+            && floating.top < taskbar.bottom
+            && floating.bottom > taskbar.top
+        {
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                )
+            }
+            .map_err(|e| e.to_string())?;
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn maintain_floating_topmost(_window: &WebviewWindow) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(windows)]
+mod z_order_events {
+    use super::*;
+    use std::cell::RefCell;
+    use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, TranslateMessage, EVENT_OBJECT_REORDER,
+        EVENT_SYSTEM_FOREGROUND, MSG, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    };
+
+    thread_local! { static WINDOW: RefCell<Option<WebviewWindow>> = const { RefCell::new(None) }; }
+
+    unsafe extern "system" fn changed(
+        _hook: HWINEVENTHOOK,
+        _event: u32,
+        _hwnd: HWND,
+        _object: i32,
+        _child: i32,
+        _thread: u32,
+        _time: u32,
+    ) {
+        WINDOW.with(|slot| {
+            if let Some(window) = slot.borrow().as_ref() {
+                let _ = maintain_floating_topmost(window);
+            }
+        });
+    }
+
+    pub fn spawn(window: WebviewWindow) {
+        std::thread::spawn(move || {
+            WINDOW.with(|slot| *slot.borrow_mut() = Some(window));
+            let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
+            // Out-of-context events are delivered on this thread's message
+            // queue. Ignore our own reordering to avoid a feedback loop.
+            let foreground = unsafe {
+                SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(changed),
+                    0,
+                    0,
+                    flags,
+                )
+            };
+            let reorder = unsafe {
+                SetWinEventHook(
+                    EVENT_OBJECT_REORDER,
+                    EVENT_OBJECT_REORDER,
+                    None,
+                    Some(changed),
+                    0,
+                    0,
+                    flags,
+                )
+            };
+            if !foreground.0.is_null() || !reorder.0.is_null() {
+                let mut message = MSG::default();
+                while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
+                    unsafe {
+                        let _ = TranslateMessage(&message);
+                        DispatchMessageW(&message);
+                    }
+                }
+            }
+            if !foreground.0.is_null() {
+                unsafe {
+                    let _ = UnhookWinEvent(foreground);
+                }
+            }
+            if !reorder.0.is_null() {
+                unsafe {
+                    let _ = UnhookWinEvent(reorder);
+                }
+            }
+            WINDOW.with(|slot| *slot.borrow_mut() = None);
+        });
+    }
+}
+
+pub fn watch_z_order(window: WebviewWindow) {
+    #[cfg(windows)]
+    z_order_events::spawn(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 #[cfg(windows)]
 fn native_hwnd(window: &WebviewWindow) -> Result<HWND, String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
@@ -31,10 +188,17 @@ pub fn embed_taskbar(
     window: &WebviewWindow,
     offset: i32,
     width_logical: f64,
+    right_anchor: bool,
+    secondary_taskbar: bool,
 ) -> Result<(), String> {
     let hwnd = native_hwnd(window)?;
-    let taskbar = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }
-        .map_err(|_| "未找到 Windows 主任务栏".to_string())?;
+    let taskbar_class = if secondary_taskbar {
+        w!("Shell_SecondaryTrayWnd")
+    } else {
+        w!("Shell_TrayWnd")
+    };
+    let taskbar = unsafe { FindWindowW(taskbar_class, None) }
+        .map_err(|_| "未找到 Windows 任务栏".to_string())?;
 
     unsafe {
         if GetParent(hwnd).ok() != Some(taskbar) {
@@ -69,7 +233,11 @@ pub fn embed_taskbar(
     } else {
         taskbar_width
     };
-    let preferred = anchor - width - gap + (offset as f64 * scale).round() as i32;
+    let preferred = if right_anchor {
+        anchor - width - gap + (offset as f64 * scale).round() as i32
+    } else {
+        gap + (offset as f64 * scale).round() as i32
+    };
     let x = preferred.clamp(0, (taskbar_width - width).max(0));
 
     unsafe {
@@ -84,6 +252,8 @@ pub fn embed_taskbar(
     _window: &WebviewWindow,
     _offset: i32,
     _width_logical: f64,
+    _right_anchor: bool,
+    _secondary_taskbar: bool,
 ) -> Result<(), String> {
     Err("任务栏嵌入仅支持 Windows".to_string())
 }
